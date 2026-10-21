@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>每日备勤轮班与统计系统</title>
+    <title>备勤统计系统</title>
     <!-- 引入 Supabase 客户端 -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
@@ -29,8 +29,13 @@
         body { background-color: var(--bg); color: var(--text-main); padding: 16px; min-height: 100vh; font-size: 14px; line-height: 1.5; }
         .container { max-width: 900px; margin: 0 auto; }
 
-        header { background: var(--card-bg); padding: 18px 20px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; text-align: center; }
-        header h1 { font-size: 1.35rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; justify-content: center; gap: 8px; }
+        header { background: var(--card-bg); padding: 16px 20px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        header h1 { font-size: 1.25rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 8px; margin: 0; }
+
+        .cloud-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 4px 10px; border-radius: 20px; background: #f1f5f9; color: var(--text-muted); border: 1px solid var(--border); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-dot.active { background-color: #10b981; }
+        .status-dot.inactive { background-color: #ef4444; }
 
         .tabs { display: grid; grid-template-columns: repeat(4, 1fr); background: #e2e8f0; padding: 4px; border-radius: 10px; margin-bottom: 16px; gap: 4px; }
         .tab-btn { padding: 10px 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 600; font-size: 0.88rem; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; text-align: center; white-space: nowrap; }
@@ -85,7 +90,7 @@
 
         .roster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
         .roster-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #fff; }
-        .roster-card-header { font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; color: var(--primary); }
+        .roster-card-header { font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; color: var(--primary); }
         .roster-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #f1f5f9; font-size: 0.85rem; }
         .roster-item select { padding: 2px 4px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border); }
         
@@ -94,8 +99,6 @@
 
         .notice-banner { background: var(--primary-light); border: 1px solid #bfdbfe; color: var(--primary); padding: 10px; border-radius: 8px; font-size: 0.82rem; margin-bottom: 14px; }
         .actions-footer { display: flex; gap: 10px; margin-top: 20px; }
-
-        #loadingOverlay { position: fixed; inset: 0; background: rgba(255,255,255,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; font-weight: bold; color: var(--primary); gap: 10px; font-size: 1.1rem; }
 
         @media (max-width: 650px) {
             body { padding: 8px; }
@@ -108,13 +111,13 @@
 </head>
 <body>
 
-<div id="loadingOverlay">
-    <div>🔄 正在连接云端数据库加载数据...</div>
-</div>
-
 <div class="container">
     <header>
-        <h1>🛡️ 每日备勤轮班与统计系统 (云端版)</h1>
+        <h1>🛡️ 备勤统计系统</h1>
+        <div class="cloud-status" id="cloudStatusBadge">
+            <span id="statusDot" class="status-dot inactive"></span>
+            <span id="statusText">连接云端中...</span>
+        </div>
     </header>
 
     <div class="tabs">
@@ -238,7 +241,7 @@
 
 <script>
     // ==========================================
-    // ⚙️ Supabase 云端凭证配置 (已更新)
+    // ⚙️ Supabase 云端凭证配置
     // ==========================================
     const SUPABASE_URL = 'https://nzgjobiiazpttqjvfhnn.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56Z2pvYmlpYXpwdHRxanZmaG5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1Nzc1MjUsImV4cCI6MjEwODE1MzUyNX0.jd5shVRoDCqoVOUlzVsFmpKoIXqPfx67P3c3uiIQc4c';
@@ -268,13 +271,27 @@
 
     let db = {
         classes: initialClasses,
+        classOrder: ["一班", "二班", "三班", "四班", "五班", "六班"],
         records: [],
         specialStatus: {}, 
         pinnedStatus: {}   
     };
 
+    function setStatus(isOnline, text) {
+        const dot = document.getElementById('statusDot');
+        const label = document.getElementById('statusText');
+        if (isOnline) {
+            dot.className = 'status-dot active';
+            label.innerText = text || '已连接云端';
+        } else {
+            dot.className = 'status-dot inactive';
+            label.innerText = text || '离线模式';
+        }
+    }
+
     // 从云端异步加载数据
     async function loadDataFromSupabase() {
+        setStatus(false, '正在连接云端...');
         try {
             let { data: settingsData, error: settingsError } = await supabaseClient
                 .from('duty_settings')
@@ -283,13 +300,17 @@
             if (settingsData && settingsData.length > 0) {
                 settingsData.forEach(row => {
                     if (row.key === 'classes') db.classes = row.value;
+                    if (row.key === 'classOrder') db.classOrder = row.value;
                     if (row.key === 'specialStatus') db.specialStatus = row.value;
                     if (row.key === 'pinnedStatus') db.pinnedStatus = row.value;
                 });
+                // 确保新增的班级如果在 classOrder 中不存在则补全
+                Object.keys(db.classes).forEach(cName => {
+                    if (!db.classOrder.includes(cName)) db.classOrder.push(cName);
+                });
             } else {
-                await saveDataToSupabase('classes', db.classes);
-                await saveDataToSupabase('specialStatus', db.specialStatus);
-                await saveDataToSupabase('pinnedStatus', db.pinnedStatus);
+                db.classOrder = Object.keys(db.classes);
+                await saveData();
             }
 
             let { data: recordsData, error: recordsError } = await supabaseClient
@@ -309,11 +330,12 @@
                 await supabaseClient.from('duty_records').insert([defaultRecord]);
             }
 
+            setStatus(true, '云端同步正常');
         } catch (err) {
             console.error('连接数据库失败:', err);
+            setStatus(false, '云端连接失败');
             alert('连接云端数据库失败，请确认网络或数据库配置！');
         } finally {
-            document.getElementById('loadingOverlay').style.display = 'none';
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('inputDate').value = today;
             renderClassCheckboxes();
@@ -326,7 +348,7 @@
                 .from('duty_settings')
                 .upsert({ key: key, value: value }, { onConflict: 'key' });
             if (error) {
-                alert('云端保存失败: ' + error.message);
+                console.error('云端保存失败: ' + error.message);
             }
         } catch (e) {
             console.error('保存配置到云端失败:', e);
@@ -335,6 +357,7 @@
 
     async function saveData() {
         await saveDataToSupabase('classes', db.classes);
+        await saveDataToSupabase('classOrder', db.classOrder);
         await saveDataToSupabase('specialStatus', db.specialStatus);
         await saveDataToSupabase('pinnedStatus', db.pinnedStatus);
     }
@@ -380,13 +403,30 @@
     };
 
     function getSortedClassNames() {
-        let keys = Object.keys(db.classes);
-        return keys.sort((a, b) => {
-            let aIsCaptain = a.includes('分队长') ? 0 : 1;
-            let bIsCaptain = b.includes('分队长') ? 0 : 1;
-            if (aIsCaptain !== bIsCaptain) return aIsCaptain - bIsCaptain;
-            return 0;
+        if (!db.classOrder) db.classOrder = Object.keys(db.classes);
+        // 确保所有 classes 中的键都在 classOrder 内
+        Object.keys(db.classes).forEach(c => {
+            if (!db.classOrder.includes(c)) db.classOrder.push(c);
         });
+        return db.classOrder.filter(c => db.classes[c]);
+    }
+
+    // 调整班级顺序
+    async function moveClassOrder(className, direction) {
+        let order = getSortedClassNames();
+        let idx = order.indexOf(className);
+        if (idx === -1) return;
+        let targetIdx = idx + direction;
+        if (targetIdx < 0 || targetIdx >= order.length) return;
+
+        let temp = order[idx];
+        order[idx] = order[targetIdx];
+        order[targetIdx] = temp;
+        db.classOrder = order;
+
+        await saveData();
+        renderRosterGrid();
+        renderClassCheckboxes();
     }
 
     function renderClassCheckboxes() {
@@ -395,7 +435,7 @@
 
         getSortedClassNames().forEach(className => {
             const persons = db.classes[className];
-            if (persons.length === 0) return;
+            if (!persons || persons.length === 0) return;
 
             let groupEl = document.createElement('div');
             groupEl.className = 'class-group';
@@ -689,6 +729,7 @@
                 newClassName = newClassName.trim();
                 if (!db.classes[newClassName]) {
                     db.classes[newClassName] = [];
+                    if (!db.classOrder.includes(newClassName)) db.classOrder.push(newClassName);
                     await saveData();
                 }
                 updateClassDropdownOptions();
@@ -749,9 +790,10 @@
         const container = document.getElementById('rosterGridContainer');
         container.innerHTML = '';
         let totalCount = 0;
+        let sortedClasses = getSortedClassNames();
 
-        getSortedClassNames().forEach(className => {
-            const persons = db.classes[className];
+        sortedClasses.forEach((className, index) => {
+            const persons = db.classes[className] || [];
             totalCount += persons.length;
 
             let card = document.createElement('div');
@@ -759,7 +801,16 @@
 
             let header = document.createElement('div');
             header.className = 'roster-card-header';
-            header.innerHTML = `<span>📁 ${className}</span><span>${persons.length} 人</span>`;
+            
+            // 组装班级标题与上下移动按钮
+            let moveButtons = `
+                <div style="display: flex; gap: 2px;">
+                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', -1)" ${index === 0 ? 'disabled style="opacity:0.3;"' : ''} title="上移">⬆️</button>
+                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', 1)" ${index === sortedClasses.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="下移">⬇️</button>
+                </div>
+            `;
+
+            header.innerHTML = `<span style="display:flex; align-items:center; gap:6px;">📁 ${className} ${moveButtons}</span><span>${persons.length} 人</span>`;
             card.appendChild(header);
 
             if (persons.length === 0) {
@@ -773,7 +824,7 @@
                     let item = document.createElement('div');
                     item.className = 'roster-item';
 
-                    let classOptions = getSortedClassNames().map(c => `<option value="${c}" ${c === className ? 'selected' : ''}>${c}</option>`).join('');
+                    let classOptions = sortedClasses.map(c => `<option value="${c}" ${c === className ? 'selected' : ''}>${c}</option>`).join('');
 
                     item.innerHTML = `
                         <div>
@@ -802,6 +853,7 @@
         try {
             const dataToExport = {
                 classes: db.classes,
+                classOrder: db.classOrder,
                 records: db.records,
                 specialStatus: db.specialStatus || {},
                 pinnedStatus: db.pinnedStatus || {},
@@ -840,19 +892,16 @@
             return;
         }
 
-        const overlay = document.getElementById('loadingOverlay');
-        overlay.querySelector('div').innerText = '🔄 正在将导入的数据恢复并同步至云端数据库...';
-        overlay.style.display = 'flex';
+        setStatus(false, '正在同步导入数据...');
 
         try {
             db.classes = parsed.classes;
+            db.classOrder = parsed.classOrder || Object.keys(db.classes);
             db.records = parsed.records;
             db.specialStatus = parsed.specialStatus || {};
             db.pinnedStatus = parsed.pinnedStatus || {};
 
-            await saveDataToSupabase('classes', db.classes);
-            await saveDataToSupabase('specialStatus', db.specialStatus);
-            await saveDataToSupabase('pinnedStatus', db.pinnedStatus);
+            await saveData();
 
             for (let r of db.records) {
                 await supabaseClient.from('duty_records').upsert({
@@ -868,7 +917,6 @@
         } catch (err) {
             console.error('导入并同步云端出错:', err);
             alert('导入成功但同步至云端数据库时出现异常！');
-            overlay.style.display = 'none';
         }
     }
 </script>
