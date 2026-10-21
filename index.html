@@ -62,6 +62,8 @@
         .btn-outline-primary { background: transparent; border: 1px solid #bfdbfe; color: var(--primary); }
         .btn-outline-primary:hover { background: var(--primary-light); }
 
+        .auto-duty-box { background: var(--primary-light); border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
         .class-group { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
         .class-header { background: #f1f5f9; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 600; font-size: 0.9rem; user-select: none; }
         .class-header:hover { background: #e2e8f0; }
@@ -106,6 +108,7 @@
             .tabs { grid-template-columns: repeat(2, 1fr); gap: 6px; }
             .tab-btn { font-size: 0.82rem; padding: 8px 4px; }
             .actions-footer { flex-direction: column; }
+            .auto-duty-box { flex-direction: column; align-items: stretch; }
         }
     </style>
 </head>
@@ -138,6 +141,23 @@
             <div class="form-group">
                 <label class="form-label">备勤日期</label>
                 <input type="date" id="inputDate" class="form-control">
+            </div>
+
+            <!-- ⚡ 智能一键自动排班 -->
+            <div class="auto-duty-box">
+                <span style="font-weight:600; color:var(--primary); white-space:nowrap;">⚡ 一键自动排班：</span>
+                <div style="display:flex; gap:6px; align-items:center; flex:1; flex-wrap:wrap;">
+                    <span style="font-size:0.85rem; color:var(--text-muted);">今日需要人数：</span>
+                    <input type="number" id="autoDutyCount" class="form-control" style="width: 80px; padding: 4px 8px; text-align: center;" min="1" placeholder="人数" value="4">
+                    <div style="display:flex; gap:4px;">
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=2; autoSelectDuty();">2人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=3; autoSelectDuty();">3人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=4; autoSelectDuty();">4人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=5; autoSelectDuty();">5人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=6; autoSelectDuty();">6人</button>
+                    </div>
+                    <button class="btn btn-primary btn-sm" style="width:auto; padding: 6px 14px;" onclick="autoSelectDuty()">智能勾选</button>
+                </div>
             </div>
 
             <div class="form-group">
@@ -182,7 +202,7 @@
         <div class="card">
             <div class="notice-banner">
                 📅 <b>账期计算规则说明</b>：每月账期区间为<b>“上月17日 - 本月16日”</b>。<br>
-                排序规则：手动置顶优先，其次<b>严格按照最后备勤日期升序排列</b>（无备勤记录者排在最前，其次最近备勤日期越久远者越优先）。花名册中开启<b>专项</b>的人员固定排在最下方。
+                排序规则：1. 手动置顶优先 ➔ 2. <b>最近备勤最久远优先</b>（备勤日期越早越靠前） ➔ 3. 新人员（无备勤记录） ➔ 4. <b>专项人员</b>（固定排在最下方）。
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 14px;">
@@ -235,7 +255,9 @@
 
     <div class="actions-footer">
         <button class="btn btn-outline-primary" onclick="exportData()">📥 导出 JSON 数据备份</button>
-        <button class="btn btn-outline-primary" onclick="importDataPrompt()">📤 导入恢复数据</button>
+        <!-- 隐藏的文件上传控件 -->
+        <input type="file" id="importFile" accept=".json" style="display: none;" onchange="handleFileImport(event)">
+        <button class="btn btn-outline-primary" onclick="document.getElementById('importFile').click()">📤 导入恢复数据</button>
     </div>
 </div>
 
@@ -304,7 +326,6 @@
                     if (row.key === 'specialStatus') db.specialStatus = row.value;
                     if (row.key === 'pinnedStatus') db.pinnedStatus = row.value;
                 });
-                // 确保新增的班级如果在 classOrder 中不存在则补全
                 Object.keys(db.classes).forEach(cName => {
                     if (!db.classOrder.includes(cName)) db.classOrder.push(cName);
                 });
@@ -404,7 +425,6 @@
 
     function getSortedClassNames() {
         if (!db.classOrder) db.classOrder = Object.keys(db.classes);
-        // 确保所有 classes 中的键都在 classOrder 内
         Object.keys(db.classes).forEach(c => {
             if (!db.classOrder.includes(c)) db.classOrder.push(c);
         });
@@ -423,6 +443,24 @@
         order[idx] = order[targetIdx];
         order[targetIdx] = temp;
         db.classOrder = order;
+
+        await saveData();
+        renderRosterGrid();
+        renderClassCheckboxes();
+    }
+
+    // 调整班级内人员顺序
+    async function movePersonOrder(className, personName, direction) {
+        let persons = db.classes[className];
+        if (!persons) return;
+        let idx = persons.indexOf(personName);
+        if (idx === -1) return;
+        let targetIdx = idx + direction;
+        if (targetIdx < 0 || targetIdx >= persons.length) return;
+
+        let temp = persons[idx];
+        persons[idx] = persons[targetIdx];
+        persons[targetIdx] = temp;
 
         await saveData();
         renderRosterGrid();
@@ -504,6 +542,82 @@
                 tag.style.display = 'inline-flex';
             } else {
                 tag.style.display = 'none';
+            }
+        });
+    }
+
+    // 获取按 1->3->2->4 精确计算的人员列表
+    function getSortedPersonnelList() {
+        let statsMap = {};
+        Object.keys(db.classes).forEach(cName => {
+            db.classes[cName].forEach(pName => {
+                statsMap[pName] = { count: 0, lastDate: '无备勤记录' };
+            });
+        });
+
+        db.records.forEach(r => {
+            r.persons.forEach(p => {
+                if (statsMap[p]) {
+                    statsMap[p].count += 1;
+                    if (statsMap[p].lastDate === '无备勤记录' || r.date > statsMap[p].lastDate) {
+                        statsMap[p].lastDate = r.date;
+                    }
+                }
+            });
+        });
+
+        let sortedList = Object.keys(statsMap).map(pName => ({
+            name: pName,
+            count: statsMap[pName].count,
+            lastDate: statsMap[pName].lastDate,
+            isPinned: !!db.pinnedStatus[pName],
+            isSpecial: db.specialStatus[pName] === true 
+        }));
+
+        sortedList.sort((a, b) => {
+            if (a.isSpecial && !b.isSpecial) return 1;
+            if (!a.isSpecial && b.isSpecial) return -1;
+            if (a.isSpecial && b.isSpecial) return 0;
+
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+
+            if (a.lastDate !== '无备勤记录' && b.lastDate === '无备勤记录') return -1;
+            if (a.lastDate === '无备勤记录' && b.lastDate !== '无备勤记录') return 1;
+
+            if (a.lastDate !== '无备勤记录' && b.lastDate !== '无备勤记录') {
+                return a.lastDate.localeCompare(b.lastDate);
+            }
+
+            return 0;
+        });
+
+        return sortedList;
+    }
+
+    // ⚡ 一键智能勾选排班人员
+    function autoSelectDuty() {
+        const countInput = document.getElementById('autoDutyCount');
+        let needCount = parseInt(countInput.value, 10);
+        if (isNaN(needCount) || needCount <= 0) {
+            alert('请输入正确的排班人数！');
+            return;
+        }
+
+        const sortedList = getSortedPersonnelList();
+        const availablePersons = sortedList.filter(item => !item.isSpecial).map(item => item.name);
+
+        if (needCount > availablePersons.length) {
+            alert(`目前可用人员仅 ${availablePersons.length} 人（已剔除专项人员），将为您全部勾选！`);
+            needCount = availablePersons.length;
+        }
+
+        const selectedNames = new Set(availablePersons.slice(0, needCount));
+
+        document.querySelectorAll('input[name="dutyPerson"]').forEach(cb => {
+            if (!cb.disabled) {
+                cb.checked = selectedNames.has(cb.value);
+                toggleTagStyle(cb);
             }
         });
     }
@@ -654,11 +768,14 @@
             if (a.isPinned && !b.isPinned) return -1;
             if (!a.isPinned && b.isPinned) return 1;
 
-            if (a.lastDate === '无备勤记录' && b.lastDate !== '无备勤记录') return -1;
-            if (a.lastDate !== '无备勤记录' && b.lastDate === '无备勤记录') return 1;
-            if (a.lastDate === '无备勤记录' && b.lastDate === '无备勤记录') return 0;
+            if (a.lastDate !== '无备勤记录' && b.lastDate === '无备勤记录') return -1;
+            if (a.lastDate === '无备勤记录' && b.lastDate !== '无备勤记录') return 1;
 
-            return a.lastDate.localeCompare(b.lastDate);
+            if (a.lastDate !== '无备勤记录' && b.lastDate !== '无备勤记录') {
+                return a.lastDate.localeCompare(b.lastDate);
+            }
+
+            return 0;
         });
 
         const tbody = document.getElementById('statsTableBody');
@@ -802,11 +919,10 @@
             let header = document.createElement('div');
             header.className = 'roster-card-header';
             
-            // 组装班级标题与上下移动按钮
             let moveButtons = `
                 <div style="display: flex; gap: 2px;">
-                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', -1)" ${index === 0 ? 'disabled style="opacity:0.3;"' : ''} title="上移">⬆️</button>
-                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', 1)" ${index === sortedClasses.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="下移">⬇️</button>
+                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', -1)" ${index === 0 ? 'disabled style="opacity:0.3;"' : ''} title="班级上移">⬆️</button>
+                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', 1)" ${index === sortedClasses.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="班级下移">⬇️</button>
                 </div>
             `;
 
@@ -819,15 +935,24 @@
                 emptyDiv.innerText = '暂无成员';
                 card.appendChild(emptyDiv);
             } else {
-                persons.forEach(p => {
+                persons.forEach((p, pIndex) => {
                     let isSpecial = db.specialStatus[p] === true;
                     let item = document.createElement('div');
                     item.className = 'roster-item';
 
                     let classOptions = sortedClasses.map(c => `<option value="${c}" ${c === className ? 'selected' : ''}>${c}</option>`).join('');
 
+                    // 组内成员上下微调按钮
+                    let personMoveBtns = `
+                        <div style="display: flex; gap: 1px;">
+                            <button class="btn btn-outline-secondary btn-sm" style="padding: 1px 4px; font-size: 0.65rem;" onclick="movePersonOrder('${className}', '${p}', -1)" ${pIndex === 0 ? 'disabled style="opacity:0.2;"' : ''} title="前移">⬅️</button>
+                            <button class="btn btn-outline-secondary btn-sm" style="padding: 1px 4px; font-size: 0.65rem;" onclick="movePersonOrder('${className}', '${p}', 1)" ${pIndex === persons.length - 1 ? 'disabled style="opacity:0.2;"' : ''} title="后移">➡️</button>
+                        </div>
+                    `;
+
                     item.innerHTML = `
-                        <div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            ${personMoveBtns}
                             <b>${p}</b>
                         </div>
                         <div style="display: flex; gap: 4px; align-items: center;">
@@ -871,53 +996,54 @@
         }
     }
 
-    async function importDataPrompt() {
-        const input = prompt("请粘贴之前导出的 JSON 数据备份内容：");
-        if (!input) return;
+    // 处理文件上传恢复
+    function handleFileImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
 
-        let parsed;
-        try {
-            parsed = JSON.parse(input);
-        } catch (e) {
-            alert("JSON 解析失败，请检查输入的数据格式是否正确！");
-            return;
-        }
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const parsed = JSON.parse(e.target.result);
 
-        if (!parsed.classes || !parsed.records) {
-            alert("备份数据格式不合规：缺少必要的 classes 或 records 字段！");
-            return;
-        }
+                if (!parsed.classes || !parsed.records) {
+                    alert("备份数据格式不合规：缺少必要的 classes 或 records 字段！");
+                    return;
+                }
 
-        if (!confirm("⚠️ 警告：导入新数据将覆盖当前的云端排班与花名册数据，确定要继续吗？")) {
-            return;
-        }
+                if (!confirm("⚠️ 警告：导入新数据将覆盖当前的云端排班与花名册数据，确定要继续吗？")) {
+                    event.target.value = '';
+                    return;
+                }
 
-        setStatus(false, '正在同步导入数据...');
+                setStatus(false, '正在同步导入数据...');
 
-        try {
-            db.classes = parsed.classes;
-            db.classOrder = parsed.classOrder || Object.keys(db.classes);
-            db.records = parsed.records;
-            db.specialStatus = parsed.specialStatus || {};
-            db.pinnedStatus = parsed.pinnedStatus || {};
+                db.classes = parsed.classes;
+                db.classOrder = parsed.classOrder || Object.keys(db.classes);
+                db.records = parsed.records;
+                db.specialStatus = parsed.specialStatus || {};
+                db.pinnedStatus = parsed.pinnedStatus || {};
 
-            await saveData();
+                await saveData();
 
-            for (let r of db.records) {
-                await supabaseClient.from('duty_records').upsert({
-                    id: r.id,
-                    date: r.date,
-                    persons: r.persons
-                }, { onConflict: 'id' });
+                for (let r of db.records) {
+                    await supabaseClient.from('duty_records').upsert({
+                        id: r.id,
+                        date: r.date,
+                        persons: r.persons
+                    }, { onConflict: 'id' });
+                }
+
+                alert("🎉 数据已成功恢复并完整同步至云端！页面即将刷新。");
+                location.reload();
+
+            } catch (err) {
+                console.error('导入并同步云端出错:', err);
+                alert('JSON 解析失败或同步至云端数据库时出现异常！');
+                event.target.value = '';
             }
-
-            alert("🎉 数据已成功恢复并完整同步至云端！页面即将刷新。");
-            location.reload();
-
-        } catch (err) {
-            console.error('导入并同步云端出错:', err);
-            alert('导入成功但同步至云端数据库时出现异常！');
-        }
+        };
+        reader.readAsText(file);
     }
 </script>
 
