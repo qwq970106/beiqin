@@ -202,7 +202,7 @@
         <div class="card">
             <div class="notice-banner">
                 📅 <b>账期计算规则说明</b>：每月账期区间为<b>“上月17日 - 本月16日”</b>。<br>
-                排序规则：1. 手动置顶优先 ➔ 2. <b>已有无记录人员优先排在上面</b> ➔ 3. 最近备勤最久远优先 ➔ 4. <b>未来新添加人员</b>默认排在下方 ➔ 5. <b>专项人员</b>在最后。
+                排序规则：1. 手动置顶优先 ➔ 2. 已有无记录人员优先 ➔ 3. 最近备勤最久远优先 ➔ 4. 未来新添加人员默认排在下方 ➔ 5. 专项人员在最后。
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 14px;">
@@ -297,7 +297,7 @@
         records: [],
         specialStatus: {}, 
         pinnedStatus: {},
-        futureNewPersons: []   // 记录未来新添加的人员
+        futureNewPersons: []   
     };
 
     function setStatus(isOnline, text) {
@@ -550,15 +550,17 @@
     }
 
     // 获取排序人员列表
-    function getSortedPersonnelList() {
+    function getSortedPersonnelList(targetRecords) {
         let statsMap = {};
+        let personClassMap = {};
         Object.keys(db.classes).forEach(cName => {
             db.classes[cName].forEach(pName => {
+                personClassMap[pName] = cName;
                 statsMap[pName] = { count: 0, lastDate: '无备勤记录' };
             });
         });
 
-        db.records.forEach(r => {
+        targetRecords.forEach(r => {
             r.persons.forEach(p => {
                 if (statsMap[p]) {
                     statsMap[p].count += 1;
@@ -571,6 +573,7 @@
 
         let sortedList = Object.keys(statsMap).map(pName => ({
             name: pName,
+            className: personClassMap[pName] || '未分配',
             count: statsMap[pName].count,
             lastDate: statsMap[pName].lastDate,
             isPinned: !!db.pinnedStatus[pName],
@@ -600,7 +603,7 @@
             }
             if (aIsNew && !bIsNew) {
                 let aIsFuture = db.futureNewPersons && db.futureNewPersons.includes(a.name);
-                return aIsFuture ? 1 : -1; // 之前已添加的无记录排在上面，未来新添加的排在下面
+                return aIsFuture ? 1 : -1; 
             }
             if (!aIsNew && bIsNew) {
                 let bIsFuture = db.futureNewPersons && db.futureNewPersons.includes(b.name);
@@ -623,7 +626,7 @@
             return;
         }
 
-        const sortedList = getSortedPersonnelList();
+        const sortedList = getSortedPersonnelList(db.records);
         const availablePersons = sortedList.filter(item => !item.isSpecial).map(item => item.name);
 
         if (needCount > availablePersons.length) {
@@ -743,7 +746,14 @@
     }
 
     function renderStats() {
-        const statsArray = getSortedPersonnelList();
+        const periodFilter = document.getElementById('monthFilter').value;
+        let targetRecords = db.records;
+
+        if (periodFilter !== 'ALL') {
+            targetRecords = db.records.filter(r => getAccountPeriod(r.date) === periodFilter);
+        }
+
+        const statsArray = getSortedPersonnelList(targetRecords);
         const tbody = document.getElementById('statsTableBody');
         tbody.innerHTML = '';
 
@@ -845,7 +855,7 @@
                 db.classes[className].push(n);
                 db.specialStatus[n] = false; 
                 if (!db.futureNewPersons) db.futureNewPersons = [];
-                db.futureNewPersons.push(n); // 标记为未来新添加的人员
+                db.futureNewPersons.push(n); 
             }
         });
 
