@@ -106,4 +106,924 @@
             body { padding: 8px; }
             .card { padding: 14px; }
             .tabs { grid-template-columns: repeat(2, 1fr); gap: 6px; }
-            .
+            .tab-btn { font-size: 0.82rem; padding: 8px 4px; }
+            .actions-footer { flex-direction: column; }
+            .auto-duty-box { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>🛡️ 备勤统计系统</h1>
+        <div class="cloud-status" id="cloudStatusBadge">
+            <span id="statusDot" class="status-dot inactive"></span>
+            <span id="statusText">连接云端中...</span>
+        </div>
+    </header>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(0)">📝 每日录入</button>
+        <button class="tab-btn" onclick="switchTab(1)">📜 历史备勤记录</button>
+        <button class="tab-btn" onclick="switchTab(2)">📊 每月及总统计</button>
+        <button class="tab-btn" onclick="switchTab(3)">⚙️ 花名册管理</button>
+    </div>
+
+    <!-- TAB 1: 📝 每日录入 -->
+    <div class="tab-content active" id="tab-0">
+        <div class="card">
+            <div class="card-title">
+                <span id="formModeTitle">新增排班记录</span>
+                <button id="cancelEditBtn" class="btn btn-secondary btn-sm" style="display:none;" onclick="resetEntryForm()">取消编辑</button>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">备勤日期</label>
+                <input type="date" id="inputDate" class="form-control">
+            </div>
+
+            <!-- ⚡ 智能一键自动排班 -->
+            <div class="auto-duty-box">
+                <span style="font-weight:600; color:var(--primary); white-space:nowrap;">⚡ 一键自动排班：</span>
+                <div style="display:flex; gap:6px; align-items:center; flex:1; flex-wrap:wrap;">
+                    <span style="font-size:0.85rem; color:var(--text-muted);">今日需要人数：</span>
+                    <input type="number" id="autoDutyCount" class="form-control" style="width: 80px; padding: 4px 8px; text-align: center;" min="1" placeholder="人数" value="4">
+                    <div style="display:flex; gap:4px;">
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=2; autoSelectDuty();">2人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=3; autoSelectDuty();">3人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=4; autoSelectDuty();">4人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=5; autoSelectDuty();">5人</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('autoDutyCount').value=6; autoSelectDuty();">6人</button>
+                    </div>
+                    <button class="btn btn-primary btn-sm" style="width:auto; padding: 6px 14px;" onclick="autoSelectDuty()">智能勾选</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">搜索过滤人员 (支持汉字 / 全拼 / 拼音首字母)</label>
+                <input type="text" id="personSearch" class="form-control" placeholder="如: zhangsan / 曾 / L" oninput="filterPersonnel()">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">选择备勤人员 (按班级分组展现，开启“专项”的人员自动置灰不可选)</label>
+                <div id="classCheckboxContainer"></div>
+            </div>
+
+            <input type="hidden" id="editingRecordId" value="">
+            <button class="btn btn-primary" onclick="submitRecord()" id="submitBtn">提交排班记录</button>
+        </div>
+    </div>
+
+    <!-- TAB 2: 📜 历史备勤记录 -->
+    <div class="tab-content" id="tab-1">
+        <div class="card">
+            <div class="card-title">
+                <span>历史备勤记录</span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">点击编辑可对记录进行修改</span>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">日期</th>
+                            <th>备勤人员名单</th>
+                            <th style="width: 110px; text-align: center;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: 📊 每月及总统计 -->
+    <div class="tab-content" id="tab-2">
+        <div class="card">
+            <div class="notice-banner">
+                📅 <b>账期计算规则说明</b>：每月账期区间为<b>“上月17日 - 本月16日”</b>。<br>
+                排序规则：1. 手动置顶优先 ➔ 2. <b>已有无记录人员优先排在上面</b> ➔ 3. 最近备勤最久远优先 ➔ 4. <b>未来新添加人员</b>默认排在下方 ➔ 5. <b>专项人员</b>在最后。
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 14px;">
+                <label class="form-label" style="margin: 0; white-space: nowrap;">选择统计账期：</label>
+                <select id="monthFilter" class="form-control" onchange="renderStats()"></select>
+            </div>
+
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>姓名</th>
+                            <th>所属班级</th>
+                            <th>备勤天数</th>
+                            <th>最近一次备勤日期</th>
+                            <th>排班状态 / 备注</th>
+                            <th style="text-align: center;">手动置顶</th>
+                        </tr>
+                    </thead>
+                    <tbody id="statsTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 4: ⚙️ 花名册管理 -->
+    <div class="tab-content" id="tab-3">
+        <div class="card">
+            <div class="card-title">新增人员</div>
+            <div style="display: flex; gap: 8px;">
+                <input type="text" id="newPersonName" class="form-control" placeholder="人员姓名（多个可用逗号隔开）">
+                <select id="newPersonClass" class="form-control" style="width: 160px;" onchange="handleClassSelectChange(this)">
+                    <option value="一班">一班</option>
+                    <option value="二班">二班</option>
+                    <option value="三班">三班</option>
+                    <option value="四班">四班</option>
+                    <option value="五班">五班</option>
+                    <option value="六班">六班</option>
+                    <option value="__ADD_NEW__">➕ 新增自定义班级...</option>
+                </select>
+                <button class="btn btn-primary" style="width: 120px;" onclick="addPersonnel()">添加</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">班级花名册管理 (总计 <span id="totalPersonCount">0</span> 人)</div>
+            <div class="roster-grid" id="rosterGridContainer"></div>
+        </div>
+    </div>
+
+    <div class="actions-footer">
+        <button class="btn btn-outline-primary" onclick="exportData()">📥 导出 JSON 数据备份</button>
+        <!-- 隐藏的文件上传控件 -->
+        <input type="file" id="importFile" accept=".json" style="display: none;" onchange="handleFileImport(event)">
+        <button class="btn btn-outline-primary" onclick="document.getElementById('importFile').click()">📤 导入恢复数据</button>
+    </div>
+</div>
+
+<script>
+    // ==========================================
+    // ⚙️ Supabase 云端凭证配置
+    // ==========================================
+    const SUPABASE_URL = 'https://nzgjobiiazpttqjvfhnn.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56Z2pvYmlpYXpwdHRxanZmaG5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1Nzc1MjUsImV4cCI6MjEwODE1MzUyNX0.jd5shVRoDCqoVOUlzVsFmpKoIXqPfx67P3c3uiIQc4c';
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const PY_MAP = {
+        '曾':'zeng','维':'wei','淳':'chun','黄':'huang','火':'huo','坤':'kun','陈':'chen','鸿':'hong','俊':'jun',
+        '樊':'fan','海':'hai','军':'jun','詹':'zhan','果':'guo','梁':'liang','耀':'yao','熙':'xi','伟':'wei',
+        '洪':'hong','马':'ma','颖':'ying','郭':'guo','昇':'sheng','林':'lin','锐':'rui','陆':'lu','永':'yong',
+        '华':'hua','李':'li','明':'ming','杨':'yang','博':'bo','冯':'feng','星':'xing','亮':'liang','周':'zhou',
+        '谊':'yi','旭':'xu','张':'zhang','鹏':'peng','汤':'tang','建':'jian','逢':'feng','育':'yu','萍':'ping',
+        '生':'sheng','福':'fu','彬':'bin','郑':'zheng','文':'wen','滔':'tao','自':'zi','屈':'qu','奇':'qi',
+        '胜':'sheng','科':'ke','朗':'lang','魏':'wei','金':'jin','山':'shan','潘':'pan','奕':'yi','仁':'ren',
+        '颜':'yan','健':'jian','杰':'jie','付':'fu','世':'shi','良':'liang','徐':'xu','胡':'hu','堪':'kan',
+        '罗':'luo','佳':'jia','东':'dong','吴':'wu','梓':'zi','凯':'kai','曦':'xi'
+    };
+
+    const initialClasses = {
+        "一班": ["曾维淳", "黄火坤", "陈鸿俊", "樊海军", "詹果", "梁耀熙"],
+        "二班": ["陈伟洪", "马俊颖", "郭昇林", "黄锐", "陆永华", "李明"],
+        "三班": ["杨博", "冯星亮", "周谊旭", "张海鹏", "汤建逢", "曾育萍"],
+        "四班": ["陈永生", "李福彬", "郑文滔", "陈自华", "屈文奇", "陈胜科"],
+        "五班": ["陈朗", "魏金山", "潘奕仁", "颜健杰", "付世良", "徐锐"],
+        "六班": ["胡堪健", "罗黄耀", "马佳星", "潘滔", "陈海东", "吴梓凯", "杨大曦"]
+    };
+
+    let db = {
+        classes: initialClasses,
+        classOrder: ["一班", "二班", "三班", "四班", "五班", "六班"],
+        records: [],
+        specialStatus: {}, 
+        pinnedStatus: {},
+        futureNewPersons: []   // 记录未来新添加的人员
+    };
+
+    function setStatus(isOnline, text) {
+        const dot = document.getElementById('statusDot');
+        const label = document.getElementById('statusText');
+        if (isOnline) {
+            dot.className = 'status-dot active';
+            label.innerText = text || '已连接云端';
+        } else {
+            dot.className = 'status-dot inactive';
+            label.innerText = text || '离线模式';
+        }
+    }
+
+    // 从云端异步加载数据
+    async function loadDataFromSupabase() {
+        setStatus(false, '正在连接云端...');
+        try {
+            let { data: settingsData, error: settingsError } = await supabaseClient
+                .from('duty_settings')
+                .select('*');
+
+            if (settingsData && settingsData.length > 0) {
+                settingsData.forEach(row => {
+                    if (row.key === 'classes') db.classes = row.value;
+                    if (row.key === 'classOrder') db.classOrder = row.value;
+                    if (row.key === 'specialStatus') db.specialStatus = row.value;
+                    if (row.key === 'pinnedStatus') db.pinnedStatus = row.value;
+                    if (row.key === 'futureNewPersons') db.futureNewPersons = row.value;
+                });
+                Object.keys(db.classes).forEach(cName => {
+                    if (!db.classOrder.includes(cName)) db.classOrder.push(cName);
+                });
+            } else {
+                db.classOrder = Object.keys(db.classes);
+                await saveData();
+            }
+
+            let { data: recordsData, error: recordsError } = await supabaseClient
+                .from('duty_records')
+                .select('*')
+                .order('date', { ascending: false });
+
+            if (recordsData && recordsData.length > 0) {
+                db.records = recordsData.map(r => ({
+                    id: r.id,
+                    date: r.date,
+                    persons: r.persons
+                }));
+            } else if (!recordsData || recordsData.length === 0) {
+                const defaultRecord = { id: Date.now(), date: "2026-10-21", persons: Object.values(initialClasses).flat() };
+                db.records = [defaultRecord];
+                await supabaseClient.from('duty_records').insert([defaultRecord]);
+            }
+
+            setStatus(true, '云端同步正常');
+        } catch (err) {
+            console.error('连接数据库失败:', err);
+            setStatus(false, '云端连接失败');
+            alert('连接云端数据库失败，请确认网络或数据库配置！');
+        } finally {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('inputDate').value = today;
+            renderClassCheckboxes();
+        }
+    }
+
+    async function saveDataToSupabase(key, value) {
+        try {
+            let { error } = await supabaseClient
+                .from('duty_settings')
+                .upsert({ key: key, value: value }, { onConflict: 'key' });
+            if (error) {
+                console.error('云端保存失败: ' + error.message);
+            }
+        } catch (e) {
+            console.error('保存配置到云端失败:', e);
+        }
+    }
+
+    async function saveData() {
+        await saveDataToSupabase('classes', db.classes);
+        await saveDataToSupabase('classOrder', db.classOrder);
+        await saveDataToSupabase('specialStatus', db.specialStatus);
+        await saveDataToSupabase('pinnedStatus', db.pinnedStatus);
+        await saveDataToSupabase('futureNewPersons', db.futureNewPersons);
+    }
+
+    function getPinyinInfo(str) {
+        let py = '', pyInit = '';
+        for (let char of str) {
+            let p = PY_MAP[char] || char;
+            py += p;
+            pyInit += p[0] || '';
+        }
+        return { full: py.toLowerCase(), init: pyInit.toLowerCase() };
+    }
+
+    function getAccountPeriod(dateStr) {
+        if (!dateStr) return '未知账期';
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return '未知账期';
+        
+        let year = d.getFullYear();
+        let month = d.getMonth() + 1;
+        let day = d.getDate();
+
+        if (day >= 17) {
+            month += 1;
+            if (month > 12) { month = 1; year += 1; }
+        }
+        return `${year}-${String(month).padStart(2, '0')}月账期`;
+    }
+
+    function switchTab(index) {
+        document.querySelectorAll('.tab-btn').forEach((btn, i) => btn.classList.toggle('active', i === index));
+        document.querySelectorAll('.tab-content').forEach((content, i) => content.classList.toggle('active', i === index));
+        
+        if (index === 0) { renderClassCheckboxes(); }
+        if (index === 1) { renderRecordsTable(); }
+        if (index === 2) { initMonthFilterOptions(); renderStats(); }
+        if (index === 3) { renderRosterGrid(); }
+    }
+
+    window.onload = function() {
+        loadDataFromSupabase();
+    };
+
+    function getSortedClassNames() {
+        if (!db.classOrder) db.classOrder = Object.keys(db.classes);
+        Object.keys(db.classes).forEach(c => {
+            if (!db.classOrder.includes(c)) db.classOrder.push(c);
+        });
+        return db.classOrder.filter(c => db.classes[c]);
+    }
+
+    // 调整班级顺序
+    async function moveClassOrder(className, direction) {
+        let order = getSortedClassNames();
+        let idx = order.indexOf(className);
+        if (idx === -1) return;
+        let targetIdx = idx + direction;
+        if (targetIdx < 0 || targetIdx >= order.length) return;
+
+        let temp = order[idx];
+        order[idx] = order[targetIdx];
+        order[targetIdx] = temp;
+        db.classOrder = order;
+
+        await saveData();
+        renderRosterGrid();
+        renderClassCheckboxes();
+    }
+
+    // 调整班级内人员顺序
+    async function movePersonOrder(className, personName, direction) {
+        let persons = db.classes[className];
+        if (!persons) return;
+        let idx = persons.indexOf(personName);
+        if (idx === -1) return;
+        let targetIdx = idx + direction;
+        if (targetIdx < 0 || targetIdx >= persons.length) return;
+
+        let temp = persons[idx];
+        persons[idx] = persons[targetIdx];
+        persons[targetIdx] = temp;
+
+        await saveData();
+        renderRosterGrid();
+        renderClassCheckboxes();
+    }
+
+    function renderClassCheckboxes() {
+        const container = document.getElementById('classCheckboxContainer');
+        container.innerHTML = '';
+
+        getSortedClassNames().forEach(className => {
+            const persons = db.classes[className];
+            if (!persons || persons.length === 0) return;
+
+            let groupEl = document.createElement('div');
+            groupEl.className = 'class-group';
+
+            let headerEl = document.createElement('div');
+            headerEl.className = 'class-header';
+            headerEl.innerHTML = `
+                <span>📁 ${className} (${persons.length}人)</span>
+                <div class="class-actions" onclick="event.stopPropagation()">
+                    <button class="btn btn-secondary btn-sm" onclick="selectAllInClass('${className}', true)">全选</button>
+                    <button class="btn btn-secondary btn-sm" onclick="selectAllInClass('${className}', false)">清空</button>
+                </div>
+            `;
+
+            let bodyEl = document.createElement('div');
+            bodyEl.className = 'class-body';
+            bodyEl.id = `body-${className}`;
+
+            persons.forEach(p => {
+                let isSpecialOn = db.specialStatus[p] === true; 
+                let tag = document.createElement('label');
+                tag.className = 'person-tag' + (isSpecialOn ? ' special-disabled' : '');
+                tag.setAttribute('data-person', p);
+                
+                let pyInfo = getPinyinInfo(p);
+                tag.setAttribute('data-py', pyInfo.full);
+                tag.setAttribute('data-pyinit', pyInfo.init);
+
+                if (isSpecialOn) {
+                    tag.innerHTML = `<input type="checkbox" name="dutyPerson" value="${p}" disabled>${p} (专项)`;
+                } else {
+                    tag.innerHTML = `<input type="checkbox" name="dutyPerson" value="${p}" onchange="toggleTagStyle(this)">${p}`;
+                }
+                bodyEl.appendChild(tag);
+            });
+
+            groupEl.appendChild(headerEl);
+            groupEl.appendChild(bodyEl);
+            container.appendChild(groupEl);
+        });
+    }
+
+    function toggleTagStyle(checkbox) {
+        checkbox.parentElement.classList.toggle('checked', checkbox.checked);
+    }
+
+    function selectAllInClass(className, isSelect) {
+        const body = document.getElementById(`body-${className}`);
+        if (!body) return;
+        body.querySelectorAll('input[type="checkbox"]:not([disabled])').forEach(cb => {
+            if (cb.parentElement.style.display !== 'none') {
+                cb.checked = isSelect;
+                toggleTagStyle(cb);
+            }
+        });
+    }
+
+    function filterPersonnel() {
+        const q = document.getElementById('personSearch').value.trim().toLowerCase();
+        document.querySelectorAll('.person-tag').forEach(tag => {
+            const name = tag.getAttribute('data-person');
+            const py = tag.getAttribute('data-py');
+            const pyInit = tag.getAttribute('data-pyinit');
+
+            if (!q || name.includes(q) || py.includes(q) || pyInit.includes(q)) {
+                tag.style.display = 'inline-flex';
+            } else {
+                tag.style.display = 'none';
+            }
+        });
+    }
+
+    // 获取排序人员列表
+    function getSortedPersonnelList() {
+        let statsMap = {};
+        Object.keys(db.classes).forEach(cName => {
+            db.classes[cName].forEach(pName => {
+                statsMap[pName] = { count: 0, lastDate: '无备勤记录' };
+            });
+        });
+
+        db.records.forEach(r => {
+            r.persons.forEach(p => {
+                if (statsMap[p]) {
+                    statsMap[p].count += 1;
+                    if (statsMap[p].lastDate === '无备勤记录' || r.date > statsMap[p].lastDate) {
+                        statsMap[p].lastDate = r.date;
+                    }
+                }
+            });
+        });
+
+        let sortedList = Object.keys(statsMap).map(pName => ({
+            name: pName,
+            count: statsMap[pName].count,
+            lastDate: statsMap[pName].lastDate,
+            isPinned: !!db.pinnedStatus[pName],
+            isSpecial: db.specialStatus[pName] === true 
+        }));
+
+        sortedList.sort((a, b) => {
+            // 4. 专项人员固定排在最底下
+            if (a.isSpecial && !b.isSpecial) return 1;
+            if (!a.isSpecial && b.isSpecial) return -1;
+            if (a.isSpecial && b.isSpecial) return 0;
+
+            // 1. 手动置顶优先
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+
+            // 2. 无备勤记录人员的精细排序
+            let aIsNew = (a.lastDate === '无备勤记录');
+            let bIsNew = (b.lastDate === '无备勤记录');
+
+            if (aIsNew && bIsNew) {
+                let aIsFuture = db.futureNewPersons && db.futureNewPersons.includes(a.name);
+                let bIsFuture = db.futureNewPersons && db.futureNewPersons.includes(b.name);
+                if (aIsFuture && !bIsFuture) return 1; // 未来新添加的排在后面
+                if (!aIsFuture && bIsFuture) return -1;
+                return 0;
+            }
+            if (aIsNew && !bIsNew) {
+                let aIsFuture = db.futureNewPersons && db.futureNewPersons.includes(a.name);
+                return aIsFuture ? 1 : -1; // 之前已添加的无记录排在上面，未来新添加的排在下面
+            }
+            if (!aIsNew && bIsNew) {
+                let bIsFuture = db.futureNewPersons && db.futureNewPersons.includes(b.name);
+                return bIsFuture ? -1 : 1;
+            }
+
+            // 3. 备勤日期越久远越靠前（升序）
+            return a.lastDate.localeCompare(b.lastDate);
+        });
+
+        return sortedList;
+    }
+
+    // ⚡ 一键智能勾选排班人员
+    function autoSelectDuty() {
+        const countInput = document.getElementById('autoDutyCount');
+        let needCount = parseInt(countInput.value, 10);
+        if (isNaN(needCount) || needCount <= 0) {
+            alert('请输入正确的排班人数！');
+            return;
+        }
+
+        const sortedList = getSortedPersonnelList();
+        const availablePersons = sortedList.filter(item => !item.isSpecial).map(item => item.name);
+
+        if (needCount > availablePersons.length) {
+            alert(`目前可用人员仅 ${availablePersons.length} 人（已剔除专项人员），将为您全部勾选！`);
+            needCount = availablePersons.length;
+        }
+
+        const selectedNames = new Set(availablePersons.slice(0, needCount));
+
+        document.querySelectorAll('input[name="dutyPerson"]').forEach(cb => {
+            if (!cb.disabled) {
+                cb.checked = selectedNames.has(cb.value);
+                toggleTagStyle(cb);
+            }
+        });
+    }
+
+    async function submitRecord() {
+        const date = document.getElementById('inputDate').value;
+        const editId = document.getElementById('editingRecordId').value;
+        const selectedCbs = document.querySelectorAll('input[name="dutyPerson"]:checked');
+        const persons = Array.from(selectedCbs).map(cb => cb.value);
+
+        if (!date) { alert('请选择备勤日期！'); return; }
+        if (persons.length === 0) { alert('请至少选择一名备勤人员！'); return; }
+
+        if (editId) {
+            const idx = db.records.findIndex(r => r.id == editId);
+            if (idx !== -1) {
+                db.records[idx].date = date;
+                db.records[idx].persons = persons;
+            }
+            await supabaseClient.from('duty_records').update({ date, persons }).eq('id', editId);
+            alert('排班记录更新成功！');
+            resetEntryForm();
+            switchTab(1);
+        } else {
+            const newRecord = { id: Date.now(), date, persons };
+            db.records.push(newRecord);
+            await supabaseClient.from('duty_records').insert([newRecord]);
+            alert('新增排班记录成功！');
+            resetEntryForm();
+        }
+    }
+
+    function resetEntryForm() {
+        document.getElementById('editingRecordId').value = '';
+        document.getElementById('formModeTitle').innerText = '新增排班记录';
+        document.getElementById('submitBtn').innerText = '提交排班记录';
+        document.getElementById('cancelEditBtn').style.display = 'none';
+        document.querySelectorAll('input[name="dutyPerson"]:not([disabled])').forEach(cb => {
+            cb.checked = false;
+            toggleTagStyle(cb);
+        });
+    }
+
+    function renderRecordsTable() {
+        const tbody = document.getElementById('recordTableBody');
+        tbody.innerHTML = '';
+
+        if (db.records.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">暂无历史排班记录</td></tr>';
+            return;
+        }
+
+        [...db.records].sort((a,b) => b.date.localeCompare(a.date)).forEach(r => {
+            tbody.innerHTML += `
+                <tr>
+                    <td><b>${r.date}</b></td>
+                    <td style="width: 65%; word-break: break-all; line-height: 1.6;">${r.persons.join('、')}</td>
+                    <td style="text-align:center;">
+                        <button class="btn btn-outline-primary btn-sm" onclick="editRecord(${r.id})">编辑</button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteRecord(${r.id})">删除</button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    function editRecord(id) {
+        const record = db.records.find(r => r.id == id);
+        if (!record) return;
+
+        switchTab(0);
+        document.getElementById('inputDate').value = record.date;
+        document.getElementById('editingRecordId').value = record.id;
+        document.getElementById('formModeTitle').innerText = `编辑排班记录 (${record.date})`;
+        document.getElementById('submitBtn').innerText = '保存修改';
+        document.getElementById('cancelEditBtn').style.display = 'inline-block';
+
+        document.querySelectorAll('input[name="dutyPerson"]').forEach(cb => {
+            if (!cb.disabled) {
+                cb.checked = record.persons.includes(cb.value);
+                toggleTagStyle(cb);
+            }
+        });
+    }
+
+    async function deleteRecord(id) {
+        if (confirm('确定要删除该条排班记录吗？')) {
+            db.records = db.records.filter(r => r.id != id);
+            await supabaseClient.from('duty_records').delete().eq('id', id);
+            renderRecordsTable();
+        }
+    }
+
+    function initMonthFilterOptions() {
+        const select = document.getElementById('monthFilter');
+        const periods = new Set();
+        db.records.forEach(r => periods.add(getAccountPeriod(r.date)));
+
+        const sortedPeriods = Array.from(periods).sort().reverse();
+        select.innerHTML = `<option value="ALL">全部总计（历史累计总和）</option>`;
+        sortedPeriods.forEach(p => {
+            select.innerHTML += `<option value="${p}">${p}</option>`;
+        });
+    }
+
+    function renderStats() {
+        const statsArray = getSortedPersonnelList();
+        const tbody = document.getElementById('statsTableBody');
+        tbody.innerHTML = '';
+
+        statsArray.forEach(item => {
+            let badgeHtml = '';
+            let isFutureNew = db.futureNewPersons && db.futureNewPersons.includes(item.name);
+
+            if (item.isSpecial) {
+                badgeHtml = `<span class="badge badge-special">专项</span>`; 
+            } else {
+                if (item.lastDate === '无备勤记录') {
+                    badgeHtml = isFutureNew 
+                        ? `<span class="badge" style="background:#f3f4f6; color:#4b5563; border:1px solid #d1d5db;">新加入(待排)</span>`
+                        : `<span class="badge badge-priority">优先备勤(新)</span>`;
+                } else {
+                    badgeHtml = `<span class="badge badge-normal">最近: ${item.lastDate}</span>`;
+                }
+
+                if (item.isPinned) {
+                    badgeHtml = `<span class="badge badge-pinned">📌 已置顶</span>` + badgeHtml;
+                }
+            }
+
+            tbody.innerHTML += `
+                <tr>
+                    <td><b>${item.name}</b></td>
+                    <td>${item.className}</td>
+                    <td><b>${item.count}</b> 天</td>
+                    <td>${item.lastDate}</td>
+                    <td>${badgeHtml}</td>
+                    <td style="text-align: center;">
+                        ${item.isSpecial ? '<span style="color:var(--text-muted); font-size:0.8rem;">-</span>' : `
+                        <button class="btn btn-sm ${item.isPinned ? 'btn-secondary' : 'btn-outline-primary'}" onclick="togglePin('${item.name}')">
+                            ${item.isPinned ? '取消置顶' : '📌 置顶'}
+                        </button>`}
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    async function togglePin(name) {
+        db.pinnedStatus[name] = !db.pinnedStatus[name];
+        await saveData();
+        renderStats();
+    }
+
+    async function toggleSpecial(name) {
+        let current = db.specialStatus[name] === true;
+        db.specialStatus[name] = !current;
+        await saveData();
+        renderRosterGrid();
+    }
+
+    function updateClassDropdownOptions() {
+        const select = document.getElementById('newPersonClass');
+        const currentVal = select.value;
+        select.innerHTML = '';
+        getSortedClassNames().forEach(cName => {
+            select.innerHTML += `<option value="${cName}">${cName}</option>`;
+        });
+        select.innerHTML += `<option value="__ADD_NEW__">➕ 新增自定义班级...</option>`;
+        if (select.querySelector(`option[value="${currentVal}"]`)) {
+            select.value = currentVal;
+        }
+    }
+
+    async function handleClassSelectChange(selectElem) {
+        if (selectElem.value === '__ADD_NEW__') {
+            let newClassName = prompt("请输入新的自定义班级名称：");
+            if (newClassName && newClassName.trim()) {
+                newClassName = newClassName.trim();
+                if (!db.classes[newClassName]) {
+                    db.classes[newClassName] = [];
+                    if (!db.classOrder.includes(newClassName)) db.classOrder.push(newClassName);
+                    await saveData();
+                }
+                updateClassDropdownOptions();
+                selectElem.value = newClassName;
+            } else {
+                selectElem.selectedIndex = 0;
+            }
+        }
+    }
+
+    async function addPersonnel() {
+        const nameInput = document.getElementById('newPersonName').value.trim();
+        const className = document.getElementById('newPersonClass').value;
+
+        if (!nameInput || className === '__ADD_NEW__') {
+            alert('请输入有效的姓名并选择班级！');
+            return;
+        }
+
+        const names = nameInput.split(/[,，\s]+/).filter(n => n);
+        names.forEach(n => {
+            let exists = Object.values(db.classes).flat().includes(n);
+            if (!exists) {
+                db.classes[className].push(n);
+                db.specialStatus[n] = false; 
+                if (!db.futureNewPersons) db.futureNewPersons = [];
+                db.futureNewPersons.push(n); // 标记为未来新添加的人员
+            }
+        });
+
+        await saveData();
+        document.getElementById('newPersonName').value = '';
+        renderRosterGrid();
+        renderClassCheckboxes();
+        alert('人员添加成功并已同步至云端！');
+    }
+
+    async function movePersonnel(name, fromClass, toClass) {
+        if (fromClass === toClass) return;
+        db.classes[fromClass] = db.classes[fromClass].filter(p => p !== name);
+        db.classes[toClass].push(name);
+        await saveData();
+        renderRosterGrid();
+        renderClassCheckboxes();
+    }
+
+    async function removePersonnel(name, className) {
+        if (confirm(`确定要从【${className}】中移除人员 ${name} 吗？`)) {
+            db.classes[className] = db.classes[className].filter(p => p !== name);
+            delete db.specialStatus[name];
+            delete db.pinnedStatus[name];
+            if (db.futureNewPersons) {
+                db.futureNewPersons = db.futureNewPersons.filter(item => item !== name);
+            }
+            await saveData();
+            renderRosterGrid();
+            renderClassCheckboxes();
+            alert('已成功移除并同步至云端！');
+        }
+    }
+
+    function renderRosterGrid() {
+        const container = document.getElementById('rosterGridContainer');
+        container.innerHTML = '';
+        let totalCount = 0;
+        let sortedClasses = getSortedClassNames();
+
+        sortedClasses.forEach((className, index) => {
+            const persons = db.classes[className] || [];
+            totalCount += persons.length;
+
+            let card = document.createElement('div');
+            card.className = 'roster-card';
+
+            let header = document.createElement('div');
+            header.className = 'roster-card-header';
+            
+            let moveButtons = `
+                <div style="display: flex; gap: 2px;">
+                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', -1)" ${index === 0 ? 'disabled style="opacity:0.3;"' : ''} title="班级上移">⬆️</button>
+                    <button class="btn btn-outline-primary btn-sm" style="padding: 1px 5px; font-size: 0.7rem;" onclick="moveClassOrder('${className}', 1)" ${index === sortedClasses.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="班级下移">⬇️</button>
+                </div>
+            `;
+
+            header.innerHTML = `<span style="display:flex; align-items:center; gap:6px;">📁 ${className} ${moveButtons}</span><span>${persons.length} 人</span>`;
+            card.appendChild(header);
+
+            if (persons.length === 0) {
+                let emptyDiv = document.createElement('div');
+                emptyDiv.style.cssText = 'color: var(--text-muted); font-size: 0.8rem; padding: 6px 0;';
+                emptyDiv.innerText = '暂无成员';
+                card.appendChild(emptyDiv);
+            } else {
+                persons.forEach((p, pIndex) => {
+                    let isSpecial = db.specialStatus[p] === true;
+                    let item = document.createElement('div');
+                    item.className = 'roster-item';
+
+                    let classOptions = sortedClasses.map(c => `<option value="${c}" ${c === className ? 'selected' : ''}>${c}</option>`).join('');
+
+                    let personMoveBtns = `
+                        <div style="display: flex; gap: 1px;">
+                            <button class="btn btn-outline-secondary btn-sm" style="padding: 1px 4px; font-size: 0.65rem;" onclick="movePersonOrder('${className}', '${p}', -1)" ${pIndex === 0 ? 'disabled style="opacity:0.2;"' : ''} title="前移">⬅️</button>
+                            <button class="btn btn-outline-secondary btn-sm" style="padding: 1px 4px; font-size: 0.65rem;" onclick="movePersonOrder('${className}', '${p}', 1)" ${pIndex === persons.length - 1 ? 'disabled style="opacity:0.2;"' : ''} title="后移">➡️</button>
+                        </div>
+                    `;
+
+                    item.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            ${personMoveBtns}
+                            <b>${p}</b>
+                        </div>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <span class="special-toggle ${isSpecial ? 'active' : ''}" onclick="toggleSpecial('${p}')">
+                                ${isSpecial ? '专项中' : '设为专项'}
+                            </span>
+                            <select onchange="movePersonnel('${p}', '${className}', this.value)" title="调整班级">
+                                ${classOptions}
+                            </select>
+                            <button class="btn btn-outline-danger btn-sm" style="padding: 1px 6px; font-size: 0.75rem;" onclick="removePersonnel('${p}', '${className}')">删</button>
+                        </div>
+                    `;
+                    card.appendChild(item);
+                });
+            }
+            container.appendChild(card);
+        });
+
+        document.getElementById('totalPersonCount').innerText = totalCount;
+    }
+
+    function exportData() {
+        try {
+            const dataToExport = {
+                classes: db.classes,
+                classOrder: db.classOrder,
+                records: db.records,
+                specialStatus: db.specialStatus || {},
+                pinnedStatus: db.pinnedStatus || {},
+                futureNewPersons: db.futureNewPersons || [],
+                exportTime: new Date().toISOString()
+            };
+            const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `duty_backup_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            console.error('导出失败:', e);
+            alert('导出备份文件失败！');
+        }
+    }
+
+    // 处理文件上传恢复
+    function handleFileImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const parsed = JSON.parse(e.target.result);
+
+                if (!parsed.classes || !parsed.records) {
+                    alert("备份数据格式不合规：缺少必要的 classes 或 records 字段！");
+                    return;
+                }
+
+                if (!confirm("⚠️ 警告：导入新数据将覆盖当前的云端排班与花名册数据，确定要继续吗？")) {
+                    event.target.value = '';
+                    return;
+                }
+
+                setStatus(false, '正在同步导入数据...');
+
+                db.classes = parsed.classes;
+                db.classOrder = parsed.classOrder || Object.keys(db.classes);
+                db.records = parsed.records;
+                db.specialStatus = parsed.specialStatus || {};
+                db.pinnedStatus = parsed.pinnedStatus || {};
+                db.futureNewPersons = parsed.futureNewPersons || [];
+
+                await saveData();
+
+                for (let r of db.records) {
+                    await supabaseClient.from('duty_records').upsert({
+                        id: r.id,
+                        date: r.date,
+                        persons: r.persons
+                    }, { onConflict: 'id' });
+                }
+
+                alert("🎉 数据已成功恢复并完整同步至云端！页面即将刷新。");
+                location.reload();
+
+            } catch (err) {
+                console.error('导入并同步云端出错:', err);
+                alert('JSON 解析失败或同步至云端数据库时出现异常！');
+                event.target.value = '';
+            }
+        };
+        reader.readAsText(file);
+    }
+</script>
+
+</body>
+</html>
